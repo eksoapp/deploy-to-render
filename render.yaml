@@ -16,7 +16,14 @@
 
 databases:
     - name: ekso-db
-      plan: starter
+      # basic-1gb is Render's sweet-spot Postgres tier for a typical Ekso
+      # install (post-2025 'starter' rename). Includes daily automatic backups
+      # — matches the durability story in /guide/manage/data-management.
+      # Trade-off vs Pro: no point-in-time recovery (Pro-only feature). Bump
+      # to basic-4gb if your working set outgrows 1 GB, or pro-4gb+ if you
+      # need PITR. Free tier is unsuitable as default — no backups, suspends
+      # after 30 days inactivity.
+      plan: basic-1gb
       databaseName: ekso
       user: ekso
       postgresMajorVersion: "18"
