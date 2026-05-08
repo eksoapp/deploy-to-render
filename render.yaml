@@ -1,0 +1,164 @@
+# Ekso self-host on Render.com
+#
+# Provisions one managed Postgres 18 (with pgvector), one web service for the
+# API, and one background worker. Operator brings their own S3-compatible
+# bucket (R2 / AWS S3 / B2 / MinIO) — Render disks can't be shared between
+# web + worker, so attachment storage must live in object storage.
+#
+# Deploy:
+#   1. Push this file to a GitHub repo you own.
+#   2. In Render: New + → Blueprint → connect the repo.
+#   3. Fill in the bucket fields when prompted (Storage__S3*).
+#   4. First boot ~2 minutes; check https://<your-api>.onrender.com/startup
+#      for HTTP 200, then complete the first-run wizard at /startup.
+#
+# Live docs: https://ekso.dev/guide/install/render
+
+databases:
+    - name: ekso-db
+      plan: starter
+      databaseName: ekso
+      user: ekso
+      postgresMajorVersion: "18"
+      # No external IPs by default — web + worker reach the DB over Render's
+      # internal network using the in-workspace credential injection below.
+      ipAllowList: []
+
+services:
+    # API + Vue SPA host. Public HTTPS endpoint, port auto-detected from the
+    # Dockerfile's EXPOSE 6050.
+    - type: web
+      name: ekso-api
+      runtime: image
+      plan: starter
+      region: oregon
+      image:
+          url: docker.io/eksoapp/app:latest
+      healthCheckPath: /startup
+
+      # Boot wrapper:
+      #   1. Stage a stub ekso.json — Program.cs requires the file (optional: false);
+      #      env vars below override every value the app actually reads.
+      #   2. Parse Render's connectionString (postgresql://user:pass@host:port/db)
+      #      into Npgsql ADO.NET form (Host=...;Port=...;...). Robust regardless
+      #      of Npgsql URI-parser version drift; URL-special chars in the
+      #      Render-generated password aren't a concern (Render uses base64-style
+      #      passwords without `@` or `/`).
+      #   3. Exec the .NET binary so PID 1 is dotnet, not sh — signals propagate
+      #      cleanly on Render restarts.
+      dockerCommand: |
+          sh -c '
+            echo "{}" > /app/ekso.json
+            url="$DATABASE_URL"
+            rest="${url#postgresql://}"
+            userpass="${rest%%@*}"
+            hostpath="${rest#*@}"
+            user="${userpass%%:*}"
+            pass="${userpass#*:}"
+            hostport="${hostpath%%/*}"
+            db="${hostpath#*/}"
+            host="${hostport%%:*}"
+            port="${hostport#*:}"
+            CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
+            export Database__PostgresTransactConnection="$CONN"
+            export Database__PostgresMartConnection="$CONN"
+            exec dotnet Ekso.Endpoint.dll
+          '
+
+      envVars:
+          - fromGroup: ekso-config
+          - key: DATABASE_URL
+            fromDatabase:
+                name: ekso-db
+                property: connectionString
+
+    # Background worker — claims rows from d_queue and dispatches embedding /
+    # email work. No HTTP surface, no health check.
+    - type: worker
+      name: ekso-worker
+      runtime: image
+      plan: starter
+      region: oregon
+      image:
+          url: docker.io/eksoapp/worker:latest
+
+      dockerCommand: |
+          sh -c '
+            echo "{}" > /app/ekso.json
+            url="$DATABASE_URL"
+            rest="${url#postgresql://}"
+            userpass="${rest%%@*}"
+            hostpath="${rest#*@}"
+            user="${userpass%%:*}"
+            pass="${userpass#*:}"
+            hostport="${hostpath%%/*}"
+            db="${hostpath#*/}"
+            host="${hostport%%:*}"
+            port="${hostport#*:}"
+            CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
+            export Database__PostgresTransactConnection="$CONN"
+            export Database__PostgresMartConnection="$CONN"
+            exec dotnet Ekso.Worker.dll
+          '
+
+      envVars:
+          - fromGroup: ekso-config
+          - key: DATABASE_URL
+            fromDatabase:
+                name: ekso-db
+                property: connectionString
+
+# Shared environment shared between api + worker. Anything that's literal, an
+# operator-supplied secret, or auto-generated lives here. fromDatabase refs
+# don't belong in groups — they're per-service and stay above.
+envVarGroups:
+    - name: ekso-config
+      envVars:
+          # ── Auth ───────────────────────────────────────────────────────
+          # Render mints a fresh 256-bit base64 string at first deploy.
+          # Comfortably above the 32-char floor required by the JWT signer.
+          - key: Auth__Jwt__Key
+            generateValue: true
+          - key: Auth__Jwt__Issuer
+            value: Ekso
+          - key: Auth__Jwt__Audience
+            value: Ekso
+
+          # ── Misc ───────────────────────────────────────────────────────
+          - key: Misc__Mode
+            value: selfhost
+          # Optional: paste a Resend API key after deploy if you want
+          # transactional email via Resend. Leaving blank falls back to
+          # SMTP, then to log-and-skip. Same for Sentry DSN.
+          - key: Misc__Resend
+            value: ""
+          - key: Misc__Sentry
+            value: ""
+
+          # ── Database (provider only; conn string composed in dockerCommand) ──
+          - key: Database__Provider
+            value: Postgres
+          - key: Database__Timeout
+            value: "300"
+          - key: Database__PostgresAutoPrepare
+            value: "false"
+
+          # ── Storage (S3-compatible — bucket details prompted at deploy) ──
+          - key: Storage__Provider
+            value: S3
+          - key: Storage__S3Region
+            # Default for Cloudflare R2. Override to "us-east-1" (AWS),
+            # "us-west-002" (B2), etc. when prompted.
+            value: auto
+          - key: Storage__S3ForcePathStyle
+            # false for AWS / R2 / B2; true for MinIO and most self-hosted
+            # S3 stacks. String-quoted because Render env vars are strings.
+            value: "false"
+          - key: Storage__S3Bucket
+            sync: false
+          - key: Storage__S3Endpoint
+            sync: false
+          - key: Storage__S3AccessKey
+            sync: false
+          - key: Storage__S3SecretKey
+            sync: false
