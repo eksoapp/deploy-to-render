@@ -59,6 +59,14 @@ services:
 
       envVars:
           - fromGroup: ekso-config
+          # Tell Render to route HTTP to port 6050 — the port the eksoapp/app
+          # Dockerfile EXPOSEs and ASPNETCORE_URLS binds to. Render's
+          # auto-detect-from-EXPOSE works in some cases but defaults to
+          # PORT=10000 when ambiguous; setting PORT explicitly removes the
+          # guesswork. Health check on /startup then probes the right port
+          # and the app responds 200 instead of timing out.
+          - key: PORT
+            value: "6050"
           # Both Transact and Mart point at the same database — Render only
           # provisions one DB resource. Npgsql parses the postgresql:// URL
           # form directly (v6.0+); no shell-side reformatting needed.
