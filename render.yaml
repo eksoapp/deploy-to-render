@@ -81,6 +81,20 @@ services:
             fromDatabase:
                 name: ekso-db
                 property: connectionString
+          # sync:false envvars must live at SERVICE level — Render silently
+          # drops them when declared inside an envVarGroup, so they wouldn't
+          # surface in the dashboard for the operator to fill. Duplicated
+          # across api+worker because Render env groups don't support
+          # operator-must-set secrets. Operator fills these on each service's
+          # Environment tab after first sync.
+          - key: Storage__S3Bucket
+            sync: false
+          - key: Storage__S3Endpoint
+            sync: false
+          - key: Storage__S3AccessKey
+            sync: false
+          - key: Storage__S3SecretKey
+            sync: false
 
     # Background worker — claims rows from d_queue and dispatches embedding /
     # email work. No HTTP surface, no health check.
@@ -115,6 +129,17 @@ services:
             fromDatabase:
                 name: ekso-db
                 property: connectionString
+          # Same sync:false S3 envvars as ekso-api — see comment above.
+          # Operator fills these on the worker's Environment tab too; same
+          # values as on api (both services hit the same bucket).
+          - key: Storage__S3Bucket
+            sync: false
+          - key: Storage__S3Endpoint
+            sync: false
+          - key: Storage__S3AccessKey
+            sync: false
+          - key: Storage__S3SecretKey
+            sync: false
 
 # Shared environment shared between api + worker. Anything that's literal, an
 # operator-supplied secret, or auto-generated lives here. fromDatabase refs
@@ -162,11 +187,7 @@ envVarGroups:
             # false for AWS / R2 / B2; true for MinIO and most self-hosted
             # S3 stacks. String-quoted because Render env vars are strings.
             value: "false"
-          - key: Storage__S3Bucket
-            sync: false
-          - key: Storage__S3Endpoint
-            sync: false
-          - key: Storage__S3AccessKey
-            sync: false
-          - key: Storage__S3SecretKey
-            sync: false
+          # NB: Storage__S3Bucket / S3Endpoint / S3AccessKey / S3SecretKey
+          # are NOT in this group — Render silently drops sync:false envvars
+          # from groups, so they wouldn't surface in the dashboard for the
+          # operator to fill. They live on each service's envVars list above.
