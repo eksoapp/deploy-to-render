@@ -43,43 +43,30 @@ services:
           url: docker.io/eksoapp/app:latest
       healthCheckPath: /startup
 
-      # Boot wrapper. Render runs dockerCommand via /bin/sh -c automatically
-      # — DO NOT wrap in `sh -c '...'` here. Wrapping double-wraps and
-      # Render's parser extracts the inner script as a literal command name,
-      # failing with "<long-script>: not found". Folded YAML scalar (>-)
-      # collapses internal newlines to single spaces so the value reaches
-      # Render as ONE physical shell line (multi-line block scalars fail
-      # with "echo: 2: Syntax error: Unterminated quoted string" because
-      # Render parses them line by line). Steps:
-      #   1. Stage a stub ekso.json — Program.cs requires the file (optional:
-      #      false); env vars below override every value the app actually reads.
-      #   2. Parse Render's connectionString (postgresql://user:pass@host:port/db)
-      #      into Npgsql ADO.NET form (Host=...;Port=...;...). Robust regardless
-      #      of Npgsql URI-parser version drift; URL-special chars in the
-      #      Render-generated password aren't a concern (Render uses base64-style
-      #      passwords without '@' or '/').
-      #   3. Exec the .NET binary so PID 1 is dotnet, not sh — signals
-      #      propagate cleanly on Render restarts.
+      # Boot wrapper — minimal. Stages a stub ekso.json (Program.cs requires
+      # the file with optional:false) and execs dotnet. Render runs
+      # dockerCommand via its own /bin/sh -c automatically, so no outer wrap.
+      #
+      # WHY NO URL PARSING: Render's templating layer rewrites `${var#prefix}`
+      # (POSIX param expansion) and any shell-runtime variable into `$(name)`
+      # markup BEFORE the shell sees it, breaking any script that constructs
+      # the connection string at boot. The DB connection strings instead
+      # come fully-formed from `fromDatabase: connectionString` below —
+      # Npgsql 10 accepts the `postgresql://user:pass@host/db` URL form
+      # natively, so no Host=...;Port=...; reformatting is needed.
       dockerCommand: >-
-          echo "{}" > /app/ekso.json
-          && url="$DATABASE_URL"
-          && rest="${url#postgresql://}"
-          && userpass="${rest%%@*}"
-          && hostpath="${rest#*@}"
-          && user="${userpass%%:*}"
-          && pass="${userpass#*:}"
-          && hostport="${hostpath%%/*}"
-          && db="${hostpath#*/}"
-          && host="${hostport%%:*}"
-          && port="${hostport#*:}"
-          && CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
-          && export Database__PostgresTransactConnection="$CONN"
-          && export Database__PostgresMartConnection="$CONN"
-          && exec dotnet Ekso.Endpoint.dll
+          echo "{}" > /app/ekso.json && exec dotnet Ekso.Endpoint.dll
 
       envVars:
           - fromGroup: ekso-config
-          - key: DATABASE_URL
+          # Both Transact and Mart point at the same database — Render only
+          # provisions one DB resource. Npgsql parses the postgresql:// URL
+          # form directly (v6.0+); no shell-side reformatting needed.
+          - key: Database__PostgresTransactConnection
+            fromDatabase:
+                name: ekso-db
+                property: connectionString
+          - key: Database__PostgresMartConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
@@ -108,28 +95,20 @@ services:
       image:
           url: docker.io/eksoapp/worker:latest
 
-      # Same shape as the ekso-api wrapper above — see that block's comment
-      # for full reasoning. No `sh -c '...'` outer wrap; Render adds its own.
+      # Same shape as ekso-api — minimal stub + exec. Connection string and
+      # Mart connection come from fromDatabase env vars below; Npgsql parses
+      # the postgresql:// URL form natively. See ekso-api block for the
+      # full why-no-shell-parsing rationale.
       dockerCommand: >-
-          echo "{}" > /app/ekso.json
-          && url="$DATABASE_URL"
-          && rest="${url#postgresql://}"
-          && userpass="${rest%%@*}"
-          && hostpath="${rest#*@}"
-          && user="${userpass%%:*}"
-          && pass="${userpass#*:}"
-          && hostport="${hostpath%%/*}"
-          && db="${hostpath#*/}"
-          && host="${hostport%%:*}"
-          && port="${hostport#*:}"
-          && CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
-          && export Database__PostgresTransactConnection="$CONN"
-          && export Database__PostgresMartConnection="$CONN"
-          && exec dotnet Ekso.Worker.dll
+          echo "{}" > /app/ekso.json && exec dotnet Ekso.Worker.dll
 
       envVars:
           - fromGroup: ekso-config
-          - key: DATABASE_URL
+          - key: Database__PostgresTransactConnection
+            fromDatabase:
+                name: ekso-db
+                property: connectionString
+          - key: Database__PostgresMartConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
