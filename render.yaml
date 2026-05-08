@@ -43,34 +43,37 @@ services:
           url: docker.io/eksoapp/app:latest
       healthCheckPath: /startup
 
-      # Boot wrapper:
-      #   1. Stage a stub ekso.json — Program.cs requires the file (optional: false);
-      #      env vars below override every value the app actually reads.
+      # Boot wrapper. Folded YAML scalar (>-) collapses internal newlines to
+      # single spaces so the value reaches Render as ONE physical shell line —
+      # Render's dockerCommand runtime parses multi-line block scalars line by
+      # line, which breaks any quoting that spans newlines (the previous
+      # multi-line version failed with "echo: 2: Syntax error: Unterminated
+      # quoted string"). Steps:
+      #   1. Stage a stub ekso.json — Program.cs requires the file (optional:
+      #      false); env vars below override every value the app actually reads.
       #   2. Parse Render's connectionString (postgresql://user:pass@host:port/db)
       #      into Npgsql ADO.NET form (Host=...;Port=...;...). Robust regardless
       #      of Npgsql URI-parser version drift; URL-special chars in the
       #      Render-generated password aren't a concern (Render uses base64-style
-      #      passwords without `@` or `/`).
-      #   3. Exec the .NET binary so PID 1 is dotnet, not sh — signals propagate
-      #      cleanly on Render restarts.
-      dockerCommand: |
-          sh -c '
-            echo "{}" > /app/ekso.json
-            url="$DATABASE_URL"
-            rest="${url#postgresql://}"
-            userpass="${rest%%@*}"
-            hostpath="${rest#*@}"
-            user="${userpass%%:*}"
-            pass="${userpass#*:}"
-            hostport="${hostpath%%/*}"
-            db="${hostpath#*/}"
-            host="${hostport%%:*}"
-            port="${hostport#*:}"
-            CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
-            export Database__PostgresTransactConnection="$CONN"
-            export Database__PostgresMartConnection="$CONN"
-            exec dotnet Ekso.Endpoint.dll
-          '
+      #      passwords without '@' or '/').
+      #   3. Exec the .NET binary so PID 1 is dotnet, not sh — signals
+      #      propagate cleanly on Render restarts.
+      dockerCommand: >-
+          sh -c 'echo "{}" > /app/ekso.json
+          && url="$DATABASE_URL"
+          && rest="${url#postgresql://}"
+          && userpass="${rest%%@*}"
+          && hostpath="${rest#*@}"
+          && user="${userpass%%:*}"
+          && pass="${userpass#*:}"
+          && hostport="${hostpath%%/*}"
+          && db="${hostpath#*/}"
+          && host="${hostport%%:*}"
+          && port="${hostport#*:}"
+          && CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
+          && export Database__PostgresTransactConnection="$CONN"
+          && export Database__PostgresMartConnection="$CONN"
+          && exec dotnet Ekso.Endpoint.dll'
 
       envVars:
           - fromGroup: ekso-config
@@ -89,24 +92,22 @@ services:
       image:
           url: docker.io/eksoapp/worker:latest
 
-      dockerCommand: |
-          sh -c '
-            echo "{}" > /app/ekso.json
-            url="$DATABASE_URL"
-            rest="${url#postgresql://}"
-            userpass="${rest%%@*}"
-            hostpath="${rest#*@}"
-            user="${userpass%%:*}"
-            pass="${userpass#*:}"
-            hostport="${hostpath%%/*}"
-            db="${hostpath#*/}"
-            host="${hostport%%:*}"
-            port="${hostport#*:}"
-            CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
-            export Database__PostgresTransactConnection="$CONN"
-            export Database__PostgresMartConnection="$CONN"
-            exec dotnet Ekso.Worker.dll
-          '
+      dockerCommand: >-
+          sh -c 'echo "{}" > /app/ekso.json
+          && url="$DATABASE_URL"
+          && rest="${url#postgresql://}"
+          && userpass="${rest%%@*}"
+          && hostpath="${rest#*@}"
+          && user="${userpass%%:*}"
+          && pass="${userpass#*:}"
+          && hostport="${hostpath%%/*}"
+          && db="${hostpath#*/}"
+          && host="${hostport%%:*}"
+          && port="${hostport#*:}"
+          && CONN="Host=${host};Port=${port};Database=${db};Username=${user};Password=${pass}"
+          && export Database__PostgresTransactConnection="$CONN"
+          && export Database__PostgresMartConnection="$CONN"
+          && exec dotnet Ekso.Worker.dll'
 
       envVars:
           - fromGroup: ekso-config
