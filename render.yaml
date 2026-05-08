@@ -1,4 +1,4 @@
-# Ekso self-host on Render.com
+# Ekso self-host on Render
 #
 # Provisions one managed Postgres 18 (with pgvector), one web service for the
 # API, and one background worker. Operator brings their own S3-compatible

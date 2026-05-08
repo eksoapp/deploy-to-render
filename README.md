@@ -1,6 +1,6 @@
 # Deploy Ekso to Render
 
-[Ekso](https://ekso.app) is a self-hosted ticketing, help desk, project management, resource planning, and time tracking app. This repo is the [Render Blueprint](https://render.com/docs/infrastructure-as-code) that deploys Ekso to [Render.com](https://render.com): managed Postgres 18 with pgvector, a web service for the API, and a background worker.
+[Ekso](https://ekso.app) is a self-hosted ticketing, help desk, project management, resource planning, and time tracking app. This repo is the [Render Blueprint](https://render.com/docs/infrastructure-as-code) that deploys Ekso to [Render](https://render.com): managed Postgres 18 with pgvector, a web service for the API, and a background worker.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/EksoApp/Deploy-to-Render)
 
