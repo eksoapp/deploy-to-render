@@ -43,19 +43,13 @@ services:
           url: docker.io/eksoapp/app:latest
       healthCheckPath: /startup
 
-      # Boot wrapper — minimal. Stages a stub ekso.json (Program.cs requires
-      # the file with optional:false) and execs dotnet. Render runs
-      # dockerCommand via its own /bin/sh -c automatically, so no outer wrap.
-      #
-      # WHY NO URL PARSING: Render's templating layer rewrites `${var#prefix}`
-      # (POSIX param expansion) and any shell-runtime variable into `$(name)`
-      # markup BEFORE the shell sees it, breaking any script that constructs
-      # the connection string at boot. The DB connection strings instead
-      # come fully-formed from `fromDatabase: connectionString` below —
-      # Npgsql 10 accepts the `postgresql://user:pass@host/db` URL form
-      # natively, so no Host=...;Port=...; reformatting is needed.
-      dockerCommand: >-
-          echo "{}" > /app/ekso.json && exec dotnet Ekso.Endpoint.dll
+      # No dockerCommand override — Dockerfile's ENTRYPOINT ["dotnet",
+      # "Ekso.Endpoint.dll"] runs directly. Backend's Program.cs makes
+      # ekso.json OPTIONAL (since 1.X), so all config flows from env vars
+      # and there's no shell wrapper to worry about. Render's dockerCommand
+      # templating eats POSIX param expansion, shell-runtime vars, and
+      # double-wrapped quoting in different ways — bypassing it entirely
+      # is the only durably-correct shape for image-based services.
 
       envVars:
           - fromGroup: ekso-config
@@ -103,12 +97,8 @@ services:
       image:
           url: docker.io/eksoapp/worker:latest
 
-      # Same shape as ekso-api — minimal stub + exec. Connection string and
-      # Mart connection come from fromDatabase env vars below; Npgsql parses
-      # the postgresql:// URL form natively. See ekso-api block for the
-      # full why-no-shell-parsing rationale.
-      dockerCommand: >-
-          echo "{}" > /app/ekso.json && exec dotnet Ekso.Worker.dll
+      # No dockerCommand override — see ekso-api block above for rationale.
+      # Dockerfile's ENTRYPOINT ["dotnet", "Ekso.Worker.dll"] runs directly.
 
       envVars:
           - fromGroup: ekso-config
