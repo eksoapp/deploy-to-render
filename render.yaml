@@ -8,9 +8,10 @@
 # Deploy:
 #   1. Push this file to a GitHub repo you own.
 #   2. In Render: New + → Blueprint → connect the repo.
-#   3. Fill in the bucket fields when prompted (Storage__S3*).
-#   4. First boot ~2 minutes; check https://<your-api>.onrender.com/startup
+#   3. First boot ~2 minutes; check https://<your-api>.onrender.com/startup
 #      for HTTP 200, then complete the first-run wizard at /startup.
+#   4. Log in as admin → Settings → System > Storage to configure S3,
+#      Settings > Mail > Outbound for email. Secrets are encrypted at rest.
 #
 # Live docs: https://ekso.dev/guide/install/render
 
@@ -64,28 +65,17 @@ services:
           # Both Transact and Mart point at the same database — Render only
           # provisions one DB resource. Npgsql parses the postgresql:// URL
           # form directly (v6.0+); no shell-side reformatting needed.
-          - key: Database__PostgresTransactConnection
+          - key: Database__TransactConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
-          - key: Database__PostgresMartConnection
+          - key: Database__MartConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
-          # sync:false envvars must live at SERVICE level — Render silently
-          # drops them when declared inside an envVarGroup, so they wouldn't
-          # surface in the dashboard for the operator to fill. Duplicated
-          # across api+worker because Render env groups don't support
-          # operator-must-set secrets. Operator fills these on each service's
-          # Environment tab after first sync.
-          - key: Storage__S3Bucket
-            sync: false
-          - key: Storage__S3Endpoint
-            sync: false
-          - key: Storage__S3AccessKey
-            sync: false
-          - key: Storage__S3SecretKey
-            sync: false
+          # S3 credentials are now configured via the admin Settings UI
+          # (Settings > System > Storage). Encrypted at rest. Operators no
+          # longer paste them into Render's Environment tab.
 
     # Background worker — claims rows from d_queue and dispatches embedding /
     # email work. No HTTP surface, no health check.
@@ -102,25 +92,14 @@ services:
 
       envVars:
           - fromGroup: ekso-config
-          - key: Database__PostgresTransactConnection
+          - key: Database__TransactConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
-          - key: Database__PostgresMartConnection
+          - key: Database__MartConnection
             fromDatabase:
                 name: ekso-db
                 property: connectionString
-          # Same sync:false S3 envvars as ekso-api — see comment above.
-          # Operator fills these on the worker's Environment tab too; same
-          # values as on api (both services hit the same bucket).
-          - key: Storage__S3Bucket
-            sync: false
-          - key: Storage__S3Endpoint
-            sync: false
-          - key: Storage__S3AccessKey
-            sync: false
-          - key: Storage__S3SecretKey
-            sync: false
 
 # Shared environment shared between api + worker. Anything that's literal, an
 # operator-supplied secret, or auto-generated lives here. fromDatabase refs
@@ -128,47 +107,23 @@ services:
 envVarGroups:
     - name: ekso-config
       envVars:
-          # ── Auth ───────────────────────────────────────────────────────
-          # Render mints a fresh 256-bit base64 string at first deploy.
-          # Comfortably above the 32-char floor required by the JWT signer.
-          - key: Auth__Jwt__Key
+          # ── Secrets ────────────────────────────────────────────────────
+          # Render mints both keys at first deploy and preserves them across
+          # redeploys. Both api+worker share the group via fromGroup, so
+          # they read the same minted values. JWT issuer/audience are
+          # hardcoded constants in EksoConstant — no longer per-install.
+          - key: Secrets__JwtKey
             generateValue: true
-          - key: Auth__Jwt__Issuer
-            value: Ekso
-          - key: Auth__Jwt__Audience
-            value: Ekso
+          - key: Secrets__EncryptionKey
+            generateValue: true
 
-          # ── Misc ───────────────────────────────────────────────────────
-          - key: Misc__Mode
-            value: selfhost
-          # Optional: paste a Resend API key after deploy if you want
-          # transactional email via Resend. Leaving blank falls back to
-          # SMTP, then to log-and-skip. Same for Sentry DSN.
-          - key: Misc__Resend
-            value: ""
-          - key: Misc__Sentry
-            value: ""
-
-          # ── Database (provider only; conn string composed in dockerCommand) ──
+          # ── Database (provider only; conn strings injected per-service) ──
           - key: Database__Provider
             value: Postgres
-          - key: Database__Timeout
-            value: "300"
-          - key: Database__PostgresAutoPrepare
-            value: "false"
 
-          # ── Storage (S3-compatible — bucket details prompted at deploy) ──
-          - key: Storage__Provider
-            value: S3
-          - key: Storage__S3Region
-            # Default for Cloudflare R2. Override to "us-east-1" (AWS),
-            # "us-west-002" (B2), etc. when prompted.
-            value: auto
-          - key: Storage__S3ForcePathStyle
-            # false for AWS / R2 / B2; true for MinIO and most self-hosted
-            # S3 stacks. String-quoted because Render env vars are strings.
-            value: "false"
-          # NB: Storage__S3Bucket / S3Endpoint / S3AccessKey / S3SecretKey
-          # are NOT in this group — Render silently drops sync:false envvars
-          # from groups, so they wouldn't surface in the dashboard for the
-          # operator to fill. They live on each service's envVars list above.
+          # Mail provider (Resend API key, SMTP credentials) and Storage
+          # backend (Local | S3 + S3 credentials) are configured via the
+          # admin Settings UI after first deploy — encrypted at rest in
+          # ConfigOutboundMail / ConfigOutboundStorage. Both Misc__Resend
+          # and Storage__S3* env vars are gone (Backend no longer reads
+          # them).
